@@ -8,7 +8,7 @@
 
 POST /api/chat
 
-````
+
 
 **Description**  
 Allows a user to chat with the system.  
@@ -17,7 +17,7 @@ Allows a user to chat with the system.
 - **After ingestion** → responds grounded on ingested document context.  
 - Supports runtime configuration (LLM provider, memory type, etc.).  
 
----
+
 
 ### Request (JSON)
 ```json

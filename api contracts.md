@@ -1,10 +1,10 @@
-```markdown
+
 # API Contracts
 
 ## 1. Chat Endpoint
 
 **Endpoint**  
-```
+
 
 POST /api/chat
 

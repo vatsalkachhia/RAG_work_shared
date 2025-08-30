@@ -74,3 +74,98 @@ def session_endpoint(request: SessionRequest, x_user_id: str = Header(None)):
         "message": "Session updated",
         "userData": user_data_store[x_user_id]
     }
+
+
+# =====================================================
+# NEW CODE STARTS HERE
+# =====================================================
+from fastapi import UploadFile, File, HTTPException
+from engine import RAGEngine  # Import your RAG pipeline
+from typing import Optional
+
+# Store per-user RAG engine
+rag_sessions: Dict[str, RAGEngine] = {}
+
+# Default config (you can tune if needed)
+DEFAULT_RAG_CONFIG = {
+    "chunking": "recursive",
+    "embedding": "huggingface",
+    "vectordb": "faiss",
+    "retrieval": "topk",
+    "llm": "groq",
+    "memory": "windowed",
+    "reranker": False,
+}
+
+class ChatRequest(BaseModel):
+    question: str
+
+class UploadTextRequest(BaseModel):
+    text: str
+
+
+def _touch_session(user_id: str):
+    """Ensure session is valid and refresh timestamp"""
+    if user_id not in user_data_store:
+        raise HTTPException(status_code=401, detail="Invalid or expired user ID")
+    user_data_store[user_id]["last_access_ts"] = time.time()
+
+
+def _get_or_create_rag(user_id: str) -> RAGEngine:
+    """Get or create a RAG engine for this session"""
+    if user_id not in rag_sessions:
+        rag_sessions[user_id] = RAGEngine(DEFAULT_RAG_CONFIG.copy())
+    return rag_sessions[user_id]
+
+
+@app.post("/upload-text")
+async def upload_text(payload: UploadTextRequest, x_user_id: Optional[str] = Header(None)):
+    """Upload raw text to build knowledge base"""
+    if not x_user_id:
+        raise HTTPException(status_code=400, detail="x-user-id header required")
+    _touch_session(x_user_id)
+
+    rag = _get_or_create_rag(x_user_id)
+    rag.build_knowledge_base(payload.text.strip())
+
+    return {"userId": x_user_id, "message": "Knowledge base built from text"}
+
+
+@app.post("/upload-file")
+async def upload_file(x_user_id: Optional[str] = Header(None), file: UploadFile = File(...)):
+    """Upload .txt file and build knowledge base"""
+    if not x_user_id:
+        raise HTTPException(status_code=400, detail="x-user-id header required")
+    _touch_session(x_user_id)
+
+    if not file.filename.endswith(".txt"):
+        raise HTTPException(status_code=415, detail="Only .txt supported for now")
+
+    text = (await file.read()).decode("utf-8")
+    rag = _get_or_create_rag(x_user_id)
+    rag.build_knowledge_base(text)
+
+    return {"userId": x_user_id, "message": f"Knowledge base built from {file.filename}"}
+
+
+@app.post("/chat")
+async def chat_with_doc(request: ChatRequest, x_user_id: Optional[str] = Header(None)):
+    """Chat with the uploaded document"""
+    if not x_user_id:
+        raise HTTPException(status_code=400, detail="x-user-id header required")
+    _touch_session(x_user_id)
+
+    if x_user_id not in rag_sessions or rag_sessions[x_user_id].vectorstore is None:
+        raise HTTPException(status_code=409, detail="No knowledge base found. Upload a document first.")
+
+    rag = rag_sessions[x_user_id]
+    result = rag.query(request.question)
+
+    return {
+        "userId": x_user_id,
+        "answer": result["answer"],
+        "sources": result.get("sources", []),
+    }
+# =====================================================
+# NEW CODE ENDS HERE
+# =====================================================
